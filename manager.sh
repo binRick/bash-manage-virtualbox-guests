@@ -200,8 +200,14 @@ portDemo(){
 	#getMaxForwardedHostPort
 	getNextForwardedHostPort
 }
+validateNewVM(){
+	VM="$1"
+	set -e
+	command ssh $SSH_COMMON_OPTS "$VM" cat /etc/redhat-release
+	command ssh $SSH_COMMON_OPTS "$VM" hostname -f
+}
 createVM(){
-	deleteAllClones
+	#deleteAllClones
 	snapshotVM "$TEMPLATE" "$SNAPSHOT_NAME"
 	createVmFromShapshot "$NEW_VM" "$TEMPLATE" "$SNAPSHOT_NAME"
 	stopVM "$NEW_VM"
@@ -212,13 +218,10 @@ createVM(){
 	copyPublicKey "$NEW_VM" "$PUBLIC_KEY_FILE"
 	secureVM "$NEW_VM"
 	SSH_PORT="$(eval getNextForwardedHostPort)"
-	showPortForwarding
 	echo "Forwarding on port $SSH_PORT"
 	createPortForward "$NEW_VM" 1 ssh $SSH_PORT 22
-	showPortForwarding
 	addHostToSshConfig "$NEW_VM" $SSH_PORT
-	command ssh $SSH_COMMON_OPTS "$NEW_VM" cat /etc/redhat-release
-	command ssh $SSH_COMMON_OPTS "$NEW_VM" hostname -f
+	validateNewVM "$NEW_VM"
 }
 
 main() {
