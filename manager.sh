@@ -14,12 +14,11 @@ PUBIC_KEY_FILE=~/.ssh/id_rsa.pub
 [[ "$PASS" == "" ]] && export PASS=12341234
 COMMON_ARGS="--username root --password $PASS"
 
-secureVM(){
-	VM="$1"
-	VBoxManage guestcontrol $VM -v $COMMON_ARGS \
-	  run --exe /bin/bash --timeout 5000 -- bash/arg0 \
-	    -c 'chown -R root:root /root; chmod -R 700 /root; systemctl enable sshd; systemctl start sshd; systemctl start sshd;' \
-	| egrep -v '^waitResult:'
+snapshotVM(){
+       TEMPLATE="$1"
+       SNAPSHOT_NAME="$2"
+	VBoxManage snapshot $TEMPLATE list|grep "Name: $SNAPSHOT_NAME (UUID: " >/dev/null || 
+	  VBoxManage snapshot $TEMPLATE take $SNAPSHOT_NAME
 }
 createVmFromShapshot(){
 	VM="$1"
@@ -29,59 +28,9 @@ createVmFromShapshot(){
 	time VBoxManage clonevm $TEMPLATE \
 	  --options link --mode machine --snapshot $SNAPSHOT_NAME --name $VM --register
 }
-snapshotVM(){
-       TEMPLATE="$1"
-       SNAPSHOT_NAME="$2"
-	VBoxManage snapshot $TEMPLATE list|grep "Name: $SNAPSHOT_NAME (UUID: " >/dev/null || 
-	  VBoxManage snapshot $TEMPLATE take $SNAPSHOT_NAME
-}
-bootstrapVM(){
-       VM="$1"
-       NEW_HOSTNAME="$2"
-	VBoxManage guestcontrol $VM $COMMON_ARGS \
-	  run \
-	   -E HN=$NEW_HOSTNAME \
-	   --exe /bin/bash --timeout 5000 -- bash/arg0 \
-	    -c 'hostnamectl set-hostname $HN; rm /root/.ssh/authorized_keys /root/.ssh/known_hosts /etc/ssh/ssh_host_* /root/.ssh/id_* 2>/dev/null; \
-	      ssh-keygen -f /etc/ssh/ssh_host_rsa_key -q -N \"\" -t rsa; ssh-keygen -q -N \"\" -t rsa -f /root/.ssh/id_rsa; \
-	      mkdir -p /root/.ssh 2>/dev/null; chmod -R 700 /root/.ssh; chown -R root:root /root; systemctl restart sshd; \
-	      systemctl status sshd'
-}
-showPortForwarding(){
-	(
-		echo PORT_FORWARDING: && for vm in $(VBoxManage list -s runningvms|cut -d'{' -f2|cut -d'}' -f1); do
-			VBoxManage showvminfo $vm > .info.txt
-			NAME="$(cat .info.txt|grep '^Name: '|tr -s ' '|cut -d' ' -f2-100)"
-			OS="$(cat .info.txt|grep 'Guest OS: '|tr -s ' '|cut -d' ' -f3-100)"
-			NATS="$(VBoxManage showvminfo $vm|grep '^NIC 1 R'|sed 's/ //g'|cut -d':' -f2|tr ',' '\n'|sed 's/=/: /g'|yaml2json 2>&1 |jq -Mrc 2>/dev/null)"
-			echo -e " - UUID: $vm\n   NAME: $NAME\n   OS: $OS\n   RULE: $NATS"
-		done
-	)	| yaml2json 2>/dev/null | jq
-}
 startVM(){
 	VM="$1"
 	VBoxManage startvm $VM --type headless
-}
-getAllClones(){
-	VBoxManage list -s vms|cut -d'"' -f2|grep "^$TEMPLATE_BASE"|grep -v "${TEMPLATE_KEYWORD}$"
-}
-stopAllClones(){
-    (	
-	getAllClones \
-		| xargs -I % echo "VBoxManage controlvm % acpipowerbutton 2>/dev/null"
-    ) | bash
-}
-deleteAllClones(){
-	set +e
-	stopAllClones
-    while [[ "$(eval getAllClones 2>/dev/null |wc -l)" -gt "0" ]]; do
-	    (
-		getAllClones \
-			| xargs -I % echo "while [ 1 ]; do VBoxManage unregistervm % --delete 2>/dev/null && exit; sleep 1.0; done"
-	    ) 	| bash
-	    sleep 1.0
-    done
-    set -e
 }
 waitForReadyVM(){
 	VM="$1"
@@ -112,10 +61,61 @@ waitForReadyVM(){
 	done
 	set -e
 }
+bootstrapVM(){
+       VM="$1"
+       NEW_HOSTNAME="$2"
+	VBoxManage guestcontrol $VM $COMMON_ARGS \
+	  run \
+	   -E HN=$NEW_HOSTNAME \
+	   --exe /bin/bash --timeout 5000 -- bash/arg0 \
+	    -c 'hostnamectl set-hostname $HN; rm /root/.ssh/authorized_keys /root/.ssh/known_hosts /etc/ssh/ssh_host_* /root/.ssh/id_* 2>/dev/null; \
+	      ssh-keygen -f /etc/ssh/ssh_host_rsa_key -q -N \"\" -t rsa; ssh-keygen -q -N \"\" -t rsa -f /root/.ssh/id_rsa; \
+	      mkdir -p /root/.ssh 2>/dev/null; chmod -R 700 /root/.ssh; chown -R root:root /root; systemctl restart sshd; \
+	      systemctl status sshd'
+}
+showPortForwarding(){
+	(
+		echo PORT_FORWARDING: && for vm in $(VBoxManage list -s runningvms|cut -d'{' -f2|cut -d'}' -f1); do
+			VBoxManage showvminfo $vm > .info.txt
+			NAME="$(cat .info.txt|grep '^Name: '|tr -s ' '|cut -d' ' -f2-100)"
+			OS="$(cat .info.txt|grep 'Guest OS: '|tr -s ' '|cut -d' ' -f3-100)"
+			NATS="$(VBoxManage showvminfo $vm|grep '^NIC 1 R'|sed 's/ //g'|cut -d':' -f2|tr ',' '\n'|sed 's/=/: /g'|yaml2json 2>&1 |jq -Mrc 2>/dev/null)"
+			echo -e " - UUID: $vm\n   NAME: $NAME\n   OS: $OS\n   RULE: $NATS"
+		done
+	)	| yaml2json 2>/dev/null | jq
+}
 copyPublicKey(){
 	VM="$1"
 	PUBIC_KEY_FILE="$2"
 	VBoxManage guestcontrol $VM -v $COMMON_ARGS copyto $PUBIC_KEY_FILE /root/.ssh/authorized_keys
+}
+secureVM(){
+	VM="$1"
+	VBoxManage guestcontrol $VM -v $COMMON_ARGS \
+	  run --exe /bin/bash --timeout 5000 -- bash/arg0 \
+	    -c 'chown -R root:root /root; chmod -R 700 /root; systemctl enable sshd; systemctl start sshd; systemctl start sshd;' \
+	| egrep -v '^waitResult:'
+}
+getAllClones(){
+	VBoxManage list -s vms|cut -d'"' -f2|grep "^$TEMPLATE_BASE"|grep -v "${TEMPLATE_KEYWORD}$"
+}
+stopAllClones(){
+    (	
+	getAllClones \
+		| xargs -I % echo "VBoxManage controlvm % acpipowerbutton 2>/dev/null"
+    ) | bash
+}
+deleteAllClones(){
+	set +e
+	stopAllClones
+    while [[ "$(eval getAllClones 2>/dev/null |wc -l)" -gt "0" ]]; do
+	    (
+		getAllClones \
+			| xargs -I % echo "while [ 1 ]; do VBoxManage unregistervm % --delete 2>/dev/null && exit; sleep 1.0; done"
+	    ) 	| bash
+	    sleep 1.0
+    done
+    set -e
 }
 createVM(){
 	deleteAllClones
