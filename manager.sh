@@ -16,7 +16,17 @@ SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-snapshot
 PUBLIC_KEY_FILE=~/.ssh/id_rsa.pub
 [[ "$PASS" == "" ]] && export PASS=12341234
 COMMON_ARGS="--username root --password $PASS"
+SSHCONFIG="$(pwd)/.sshconfig/sshconfig"
+SSH_COMMON_OPTS="-q -oStrictHostKeyChecking=no"
 
+addHostToSshConfig(){
+	VM="$1"
+	HOST_SSH_PORT="$2"
+	set +e
+	$SSHCONFIG rm "$VM" >/dev/null 2>&1
+	set -e
+	$SSHCONFIG add "$VM" root 127.0.0.1 $HOST_SSH_PORT
+}
 snapshotVM(){
        TEMPLATE="$1"
        SNAPSHOT_NAME="$2"
@@ -159,7 +169,7 @@ deleteAllClones(){
 testServerSshConnection(){
 	VM="$1"
 	SSH_PORT="$2"
-	cmd="command ssh -oPort=$SSH_PORT -oStrictHostKeyChecking=no -q root@127.0.0.1 hostname -f"
+	cmd="command ssh $SSH_COMMON_OPTS -oPort=$SSH_PORT root@127.0.0.1 hostname -f"
 	eval $cmd >/dev/null
 }
 manageVM(){
@@ -167,6 +177,8 @@ manageVM(){
 	deletePortForward "$NEW_VM" 1 ssh
 	startVM "$NEW_VM"
 	SSH_PORT="$(eval getNextForwardedHostPort)"
+	showPortForwarding
+	echo "Forwarding on port $SSH_PORT"
 	createPortForward "$NEW_VM" 1 ssh $SSH_PORT 22
 	showPortForwarding
 	testServerSshConnection "$NEW_VM" $SSH_PORT
@@ -189,22 +201,32 @@ portDemo(){
 	getNextForwardedHostPort
 }
 createVM(){
-	#deleteAllClones
+	deleteAllClones
 	snapshotVM "$TEMPLATE" "$SNAPSHOT_NAME"
 	createVmFromShapshot "$NEW_VM" "$TEMPLATE" "$SNAPSHOT_NAME"
+	stopVM "$NEW_VM"
+	deletePortForward "$NEW_VM" 1 ssh
 	startVM "$NEW_VM"
 	waitForReadyVM "$NEW_VM"
 	bootstrapVM "$NEW_VM" "$NEW_HOSTNAME"
 	copyPublicKey "$NEW_VM" "$PUBLIC_KEY_FILE"
 	secureVM "$NEW_VM"
+	SSH_PORT="$(eval getNextForwardedHostPort)"
 	showPortForwarding
+	echo "Forwarding on port $SSH_PORT"
+	createPortForward "$NEW_VM" 1 ssh $SSH_PORT 22
+	showPortForwarding
+	addHostToSshConfig "$NEW_VM" $SSH_PORT
+	command ssh $SSH_COMMON_OPTS "$NEW_VM" cat /etc/redhat-release
+	command ssh $SSH_COMMON_OPTS "$NEW_VM" hostname -f
 }
 
 main() {
-    if [[ "1" == "0" ]]; then
+    re='^[0-9]+$'
+    re2='^vm[0-9]+$'
+    if ! [[ $1 =~ $re ]] && ! [[ $1 =~ $re2 ]]; then
         "${1}"
     else
-        echo
 	#portDemo
 	#manageVM
 	createVM
