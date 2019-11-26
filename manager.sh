@@ -13,8 +13,11 @@ VM_SUFFIX="$1"
 NEW_VM=${TEMPLATE_BASE}${VM_SUFFIX}
 NEW_HOSTNAME=$NEW_VM
 TEMPLATE=${TEMPLATE_BASE}${TEMPLATE_KEYWORD}
-SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-snapshot
-PUBLIC_KEY_FILE=~/.ssh/id_rsa.pub
+SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard
+
+PUBLIC_KEY_FILE=`mktemp`
+echo "$_PUBLIC_KEY"|base64 -d > $PUBLIC_KEY_FILE
+
 [[ "$PASS" == "" ]] && export PASS=12341234
 COMMON_ARGS="--username root --password $PASS"
 SSHCONFIG="$(pwd)/.sshconfig/sshconfig"
@@ -114,7 +117,7 @@ bootstrapVM(){
 	   -E HN=$NEW_HOSTNAME \
 	   --exe /bin/bash --timeout 5000 -- bash/arg0 \
 	    -c 'hostnamectl set-hostname $HN; rm /root/.ssh/authorized_keys /root/.ssh/known_hosts /etc/ssh/ssh_host_* /root/.ssh/id_* 2>/dev/null; \
-	      ssh-keygen -f /etc/ssh/ssh_host_rsa_key -q -N \"\" -t rsa; ssh-keygen -q -N \"\" -t rsa -f /root/.ssh/id_rsa; \
+	      ssh-keygen -f /etc/ssh/ssh_host_rsa_key -q -N "" -t rsa; ssh-keygen -q -N "" -t rsa -f ~/.ssh/id_rsa; \
 	      mkdir -p /root/.ssh 2>/dev/null; chmod -R 700 /root/.ssh; chown -R root:root /root; systemctl restart sshd; \
 	      systemctl status sshd' >/dev/null
 }
@@ -179,7 +182,7 @@ secureVM(){
 	VM="$1"
 	VBoxManage guestcontrol $VM -v $COMMON_ARGS \
 	  run --exe /bin/bash --timeout 5000 -- bash/arg0 \
-	    -c 'chown -R root:root /root; chmod -R 700 /root; systemctl enable sshd; systemctl start sshd; systemctl start sshd;' \
+	    -c 'chown -R root:root /root; chmod -R 700 /root; systemctl enable sshd; systemctl start sshd; systemctl status sshd;' \
 	| egrep -v '^waitResult:'
 }
 getAllVMs_raw(){
@@ -304,6 +307,7 @@ createVM(){
 	addHostToSshConfig "$NEW_VM" $SSH_PORT
 	addHostToSshConfig "$VM_SUFFIX" $SSH_PORT
 	validateNewVM "$NEW_VM"
+    time ./install_vm_wireguard.sh "$NEW_VM"
 }
 
 main() {

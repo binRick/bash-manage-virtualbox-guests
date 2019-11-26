@@ -1,0 +1,12 @@
+[Unit]
+Description="VPN Keepalive to ifconfig.me"
+
+[Timer]
+#OnCalendar=*:0/10
+OnBootSec=3min
+OnUnitActiveSec=10m
+Unit=vpn.service
+
+[Install]
+WantedBy=multi-user.target
+
