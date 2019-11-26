@@ -16,9 +16,9 @@ VM_PREFIX="vm"
 NEW_VM=${TEMPLATE_BASE}${VM_SUFFIX}
 NEW_HOSTNAME=$NEW_VM
 TEMPLATE=${TEMPLATE_BASE}${TEMPLATE_KEYWORD}
-SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard1
+SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard-ansible
 export B64_DECODE_FLAG=$(set +e; echo 123 | base64 |base64 -d 2>/dev/null |grep -q 123 && echo d || echo D)
-timeout=$(set +e; (command -v timeout || command -v gtimeout || brew install coreutils && command -v gtimeout|grep timeout |head -n1))
+timeout=$(set +e; (command -v timeout || command -v gtimeout || brew install coreutils && command -v gtimeout|grep timeout) |head -n1)
 
 
 
@@ -51,6 +51,10 @@ addHostToSshConfig(){
 			exit $exit_code;
     fi
 	set -e
+}
+getVMIP(){
+    VM="$1"
+    VBoxManage guestproperty get "$VM" /VirtualBox/GuestInfo/Net/0/V4/IP |cut -d' ' -f2
 }
 snapshotVM(){
     TEMPLATE="$1"

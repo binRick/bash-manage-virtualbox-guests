@@ -4,8 +4,8 @@ VM="$1"
 _WIREGUARD_SERVER_ENDPOINT="${_WIREGUARD_SERVER_ENDPOINT_DOMAIN}:${_WIREGUARD_SERVER_ENDPOINT_PORT}"
 if [[ "$_WIREGUARD_SERVER_ENDPOINT" == ":" ]]; then echo invalid _WIREGUARD_SERVER_ENDPOINT; exit 1; fi
 _WIREGUARD_CLIENT_ROUTES="216.239.0.0/16"
-SSH_OPTS="-oStrictHostKeyChecking=no -tt"
-VM_PACKAGES="rsync"
+SSH_OPTS="-oStrictHostKeyChecking=no -tt -q"
+VM_PACKAGES="rsync tcpdump ngrep telnet"
 RSYNC_OPTS="-e 'ssh $SSH_OPTS'"
 RSYNC_OPTS=""
 INSTALL_VM_PATH="/root/.wireguard_installer"
@@ -21,11 +21,10 @@ WIREGUARD_INTERFACE="wg0"
 WIREGUARD_CONFIG="/etc/wireguard/${WIREGUARD_INTERFACE}.conf"
 CLIENT_IP_SUFFIX_MIN="2"
 CLIENT_IP_SUFFIX_MAX="250"
-_SUBNET="192.168.4."
+_SUBNET="10.14."
 WG_SAVE_CMD="wg-quick save $WIREGUARD_INTERFACE"
-
 GET_CLIENT_IP_CMD="echo \$(( ( RANDOM % $CLIENT_IP_SUFFIX_MAX )  + $CLIENT_IP_SUFFIX_MIN ))"
-GET_CLIENT_IP_SUFFIXES_IN_USE_CMD_ENCODED=$(echo 'wg|grep allowed|grep -oE "\b([0-9]{1,3}\.){3}[0-9]{1,3}\b"|sed "s/192.168.4.//g"|sort|uniq'|base64 -w0)
+GET_CLIENT_IP_SUFFIXES_IN_USE_CMD_ENCODED=$(echo "wg|grep allowed|grep -oE \"\b([0-9]{1,3}\.){3}[0-9]{1,3}\b\"|sed \"s/${_SUBNET}//g\"|sort|uniq"|base64 -w0)
 SETUP_WIREGUARD_CLIENT_CMD_ENCODED=$(echo '
 sed -i "s/[[:space:]]//g" /root/vars.sh
 source /root/vars.sh;
@@ -47,40 +46,36 @@ wg;
 echo -e "\n\n"; 
 timeout 5 curl ifconfig.me; 
 echo -e "\n\n";'|base64 -w0)
-
 GET_CLIENT_IP_SUFFIXES_IN_USE_CMD="echo \"$GET_CLIENT_IP_SUFFIXES_IN_USE_CMD_ENCODED\"|base64 -d > script.sh && bash -ex script.sh"
 SETUP_WIREGUARD_CLIENT_CMD="echo \"$SETUP_WIREGUARD_CLIENT_CMD_ENCODED\"|base64 -d > script.sh && bash -x script.sh"
 GET_WIREGUARD_SERVER_IP_CMD="grep ^Address $WIREGUARD_CONFIG |grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b'"
-
+SUFFIXES_IN_USE_FILE=`mktemp`
+IPS_IN_USE_FILE=`mktemp`
+SERVER_PUBLIC_KEY_FILE=`mktemp`
+SERVER_IP_FILE=`mktemp`
 
 GET_RANDOM_CLIENT_IP_SUFFIX(){
     echo $(( ( RANDOM % $CLIENT_IP_SUFFIX_MAX )  + $CLIENT_IP_SUFFIX_MIN ))
 }
 
-GET_RANDOM_CLIENT_IP_SUFFIX
-GET_RANDOM_CLIENT_IP_SUFFIX
-GET_RANDOM_CLIENT_IP_SUFFIX
-
-SUFFIXES_IN_USE_FILE=`mktemp`
-IPS_IN_USE_FILE=`mktemp`
-SERVER_PUBLIC_KEY_FILE=`mktemp`
-SERVER_IP_FILE=`mktemp`
 command ssh $SSH_OPTS root@vpnservice.company "sh -c \"$GET_CLIENT_IP_SUFFIXES_IN_USE_CMD\"" > $SUFFIXES_IN_USE_FILE
 command ssh $SSH_OPTS root@vpnservice.company "sh -c \"cat $PUBLIC_KEY_PATH\"" > $SERVER_PUBLIC_KEY_FILE
 command ssh $SSH_OPTS root@vpnservice.company "$GET_WIREGUARD_SERVER_IP_CMD" > $SERVER_IP_FILE
+
+_WIREGUARD_SERVER_PUBLIC_KEY="$(cat $SERVER_PUBLIC_KEY_FILE)"
 
 echo "There are $(cat $SUFFIXES_IN_USE_FILE|wc -l|cut -d' ' -f1) IP Suffixes in use in subnet ${_SUBNET}"
 
 (
  while IFS= read -r SUFFIX; do
-    SUFFIX="$(echo $SUFFIX|sed 's/[[:space:]]//g'|head -n1)"
-    #echo IP=${_SUBNET}${SUFFIX}
-    echo "_${SUFFIX}_"
+   SUFFIX="$(echo $SUFFIX|sed 's/[[:space:]]//g'|head -n1)"
+   #echo IP=${_SUBNET}${SUFFIX}
+   echo "_${SUFFIX}_"
  done < $SUFFIXES_IN_USE_FILE
 ) > $IPS_IN_USE_FILE
 
-#echo IPs in use:
-#cat $IPS_IN_USE_FILE 
+echo IPs in use:
+cat $IPS_IN_USE_FILE 
 
 ip_is_available(){
     IP="$1"
@@ -89,25 +84,25 @@ ip_is_available(){
 suffixToIP(){
     echo "${_SUBNET}$1"
 }
+getRandomOctet(){
+  echo $(( RANDOM % 256 ))
+}
 
-CUR_SUFFIX=$CLIENT_IP_SUFFIX_MIN
-CUR_IP="$(suffixToIP $CUR_SUFFIX)"
-while [[ "$(eval ip_is_available "$CUR_SUFFIX")" -gt "0" ]]; do
+getRandomIP(){
+    IP="${_SUBNET}$(getRandomOctet).$(getRandomOctet)"
+    echo $IP
+}
+
+_WIREGUARD_CLIENT_ADDRESS=$(getRandomIP)
+while [[ "$(eval ip_is_available "$_WIREGUARD_CLIENT_ADDRESS")" -gt "0" ]]; do
+    _WIREGUARD_CLIENT_ADDRESS=$(getRandomIP)
     ((CUR_SUFFIX++))
 done
 
+echo _WIREGUARD_CLIENT_ADDRESS=$_WIREGUARD_CLIENT_ADDRESS
 
-if [[ "$CUR_SUFFIX" -gt "$CLIENT_IP_SUFFIX_MAX" ]]; then
-    echo Invalid Suffix $CUR_SUFFIX
-    exit 1
-fi
-
-
-_WIREGUARD_CLIENT_ADDRESS="$(suffixToIP $CUR_SUFFIX)"
-_WIREGUARD_SERVER_PUBLIC_KEY="$(cat $SERVER_PUBLIC_KEY_FILE)"
 
 echo Found Client Address ${_WIREGUARD_CLIENT_ADDRESS}
-
 
 command ssh $SSH_OPTS $VM "sh -c \"rm -rf $INSTALL_VM_PATH 2>/dev/null; mkdir -p $INSTALL_VM_PATH 2>/dev/null; dnf -y install $VM_PACKAGES\""
 command rsync -ar $RSYNC_OPTS $INSTALL_FILES ${VM}:${INSTALL_VM_PATH}/.
