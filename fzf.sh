@@ -1,0 +1,1 @@
+./getFunctionNames.sh | fzf --ansi

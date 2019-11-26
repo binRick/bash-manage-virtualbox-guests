@@ -7,16 +7,25 @@ set +e
 command yaml2json --version >/dev/null 2>&1 || . ~/.venv/bin/activate
 set -e
 
+VM_MIN_ID=100
+VM_MAX_ID=1000
 TEMPLATE_BASE=centos-8-
 TEMPLATE_KEYWORD=template
 VM_SUFFIX="$1"
+VM_PREFIX="vm"
 NEW_VM=${TEMPLATE_BASE}${VM_SUFFIX}
 NEW_HOSTNAME=$NEW_VM
 TEMPLATE=${TEMPLATE_BASE}${TEMPLATE_KEYWORD}
-SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard
+SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard1
+export B64_DECODE_FLAG=$(set +e; echo 123 | base64 |base64 -d 2>/dev/null |grep -q 123 && echo d || echo D)
+timeout=$(set +e; (command -v timeout || command -v gtimeout || brew install coreutils && command -v gtimeout|grep timeout |head -n1))
+
+
 
 PUBLIC_KEY_FILE=`mktemp`
-echo "$_PUBLIC_KEY"|base64 -d > $PUBLIC_KEY_FILE
+echo "$_PUBLIC_KEY"|base64 -$B64_DECODE_FLAG 2>/dev/null > $PUBLIC_KEY_FILE
+
+cat $PUBLIC_KEY_FILE|grep -q ^ssh-rsa
 
 [[ "$PASS" == "" ]] && export PASS=12341234
 COMMON_ARGS="--username root --password $PASS"
@@ -60,10 +69,33 @@ deleteSnapshot(){
     set -e
     VBoxManage snapshot "$VM" delete "$SNAPSHOT_NAME"
 }
+vmExists(){
+	VM="$1"
+	getAllVMs | grep -q "^${VM}$"
+}
+normalizeNewVMName(){
+	VM="$1"
+#	if echo "$VM" | grep -q "\-${VM_PREFIX}"; then export VM="${VM_PREFIX}${VM}"; fi
+	if echo "$VM" | grep -q '\-random$'; then
+		_VM="$VM"
+		getAllVMs > .vms.txt
+		echo "$VM" >> .vms.txt
+		while $(grep -q "^$VM$" .vms.txt); do
+			echo "vm exists..."
+			sleep .1
+			R=$(( ( RANDOM % $VM_MAX_ID )  + $VM_MIN_ID ))
+			VM=$(echo "$_VM"|sed "s/-random/$R/g" )
+		done
+		rm .vms.txt
+	fi
+#	echo "$VM" | grep -q "{$TEMPLATE_BASE}" || export VM="${TEMPLATE_BASE}${VM}"
+	echo "$VM"
+}
 createVmFromShapshot(){
 	VM="$1"
 	TEMPLATE="$2"
 	SNAPSHOT_NAME="$3"
+	set -e
 	# Create VM from snapshot
 	VBoxManage clonevm $TEMPLATE \
     	  --options link --mode machine --snapshot $SNAPSHOT_NAME --name $VM --register
@@ -75,8 +107,17 @@ startVM(){
 stopVM(){
 	set +e
 	VM="$1"
-	VBoxManage controlvm "$VM" acpipowerbutton
-	#VBoxManage controlvm "$VM" poweroff
+	SHUTDOWN=0
+	MAX_SECS=15
+	$timeout $MAX_SECS VBoxManage controlvm "$VM" acpipowerbutton
+       #	| grep 'is not currently running' && exit
+#	while [[ "$SHUTDOWN" == "0" ]]; do
+#		($timeout $MAX_SECS VBoxManage controlvm "$VM" acpipowerbutton 2>&1)|grep 'is not currently running' && exit
+#			echo "VM $VM not shutdown $MAX_SECS seconds after power button pressed." && \
+#				timeout $MAX_SECS VBoxManage controlvm "$VM" poweroff
+#
+#		sleep 1.0
+#	done
 	set -e
 }
 waitForReadyVM(){
@@ -120,6 +161,14 @@ bootstrapVM(){
 	      ssh-keygen -f /etc/ssh/ssh_host_rsa_key -q -N "" -t rsa; ssh-keygen -q -N "" -t rsa -f ~/.ssh/id_rsa; \
 	      mkdir -p /root/.ssh 2>/dev/null; chmod -R 700 /root/.ssh; chown -R root:root /root; systemctl restart sshd; \
 	      systemctl status sshd' >/dev/null
+}
+vmCommand(){
+	VM="$1"
+	CMD="$2"
+	cmd="VBoxManage guestcontrol \"$VM\" $COMMON_ARGS run --exe /bin/bash --timeout 5000 -- bash/arg0 -c \"$CMD\""
+	echo "$cmd"
+	eval $cmd
+	exit_code=$?
 }
 showPortForwarding(){
 	set +e
@@ -197,8 +246,8 @@ getAllClones(){
 stopAllClones(){
     (	
 	getAllClones \
-		| xargs -I % echo "VBoxManage controlvm % acpipowerbutton 2>/dev/null"
-    ) | bash
+		| xargs -I % echo "VBoxManage controlvm % acpipowerbutton"
+    )|xargs -P 3 -I % sh -c "%"
 }
 deleteVM(){
    	export VM="$1"
@@ -226,27 +275,18 @@ deleteVM(){
         exit $exit_code;
     fi
 }
-#                VBoxManage unregistervm % --delete 2>/dev/null && exit; sleep 1.0 \
 deleteAllClones(){
 	set +e
-	stopAllClones
-    while [[ "$(eval getAllClones 2>/dev/null |wc -l)" -gt "0" ]]; do
-        for c in $(getAllClones|egrep "^${TEMPLATE_BASE}vm[0-9]|^${TEMPLATE_BASE}[0-9]"); do
-            deleteVM "$c"
-        done
-        sleep 1.0
-    done
-
-#    exit 0
-#    while [[ "$(eval getAllClones 2>/dev/null |wc -l)" -gt "0" ]]; do
-#	    (
-#		getAllClones \
-#			| xargs -I % echo "while [[ "1" ]]; do \
-#                $(deleteVM "$VM_SUFFIX" && exit); sleep 1.0 \
-#            done" \
-#	    )
-#	    sleep 1.0
-#    done
+	stopAllClones 2>/dev/null
+	while [[ "$(eval getAllClones 2>/dev/null |wc -l)" -gt "0" ]]; do
+		(
+		  for c in $(getAllClones|egrep "^${TEMPLATE_BASE}vm[0-9]|^${TEMPLATE_BASE}[0-9]"); do
+		    cmd="deleteVM \"$c\""
+		    eval $cmd
+		  done
+		)
+		sleep 1.0
+	done
     set -e
 }
 testServerSshConnection(){
@@ -286,14 +326,16 @@ portDemo(){
 validateNewVM(){
 	VM="$1"
 	set -e
-	command ssh $SSH_COMMON_OPTS "$VM" cat /etc/redhat-release >/dev/null
-	command ssh $SSH_COMMON_OPTS "$VM" hostname -f >/dev/null
+	cmd="command ssh $SSH_COMMON_OPTS "$VM" cat /etc/redhat-release"
+	eval $cmd >/dev/null
+	cmd="command ssh $SSH_COMMON_OPTS "$VM" hostname -f"
+	eval $cmd > /dev/null
 }
 createVM(){
-	#deleteAllClones
+	[[ "$_DELETE_ALL_CLONES" == "1" ]] && deleteAllClones
 	snapshotVM "$TEMPLATE" "$SNAPSHOT_NAME"
 	createVmFromShapshot "$NEW_VM" "$TEMPLATE" "$SNAPSHOT_NAME"
-    #deleteSnapshot "$TEMPLATE" "$SNAPSHOT_NAME"
+    	#deleteSnapshot "$TEMPLATE" "$SNAPSHOT_NAME"
 	stopVM "$NEW_VM"
 	deletePortForward "$NEW_VM" 1 ssh
 	startVM "$NEW_VM"
@@ -302,12 +344,11 @@ createVM(){
 	copyPublicKey "$NEW_VM" "$PUBLIC_KEY_FILE"
 	secureVM "$NEW_VM"
 	SSH_PORT="$(eval getNextForwardedHostPort)"
-	echo "Forwarding on port $SSH_PORT"
 	createPortForward "$NEW_VM" 1 ssh $SSH_PORT 22
 	addHostToSshConfig "$NEW_VM" $SSH_PORT
 	addHostToSshConfig "$VM_SUFFIX" $SSH_PORT
 	validateNewVM "$NEW_VM"
-    time ./install_vm_wireguard.sh "$NEW_VM"
+	[[ "$_INSTALL_WIREGUARD" == "1" ]] && time ./install_vm_wireguard.sh "$NEW_VM"
 }
 
 main() {
