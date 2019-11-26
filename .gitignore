@@ -1,3 +1,5 @@
 .logs/
 .info.txt
 *.swp
+.NATS-*txt
+.NATS.txt

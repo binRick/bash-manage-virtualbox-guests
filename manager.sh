@@ -9,7 +9,8 @@ set -e
 
 TEMPLATE_BASE=centos-8-
 TEMPLATE_KEYWORD=template
-NEW_VM=${TEMPLATE_BASE}$1
+VM_SUFFIX="$1"
+NEW_VM=${TEMPLATE_BASE}${VM_SUFFIX}
 NEW_HOSTNAME=$NEW_VM
 TEMPLATE=${TEMPLATE_BASE}${TEMPLATE_KEYWORD}
 SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-snapshot
@@ -18,20 +19,43 @@ PUBLIC_KEY_FILE=~/.ssh/id_rsa.pub
 COMMON_ARGS="--username root --password $PASS"
 SSHCONFIG="$(pwd)/.sshconfig/sshconfig"
 SSH_COMMON_OPTS="-q -oStrictHostKeyChecking=no"
+if [[ "$DEBUG_MODE" == "" ]]; then export DEBUG_MODE=="0"; fi
+MANAGED_VM_SUFFIX_RE1='^[0-9]+$'
+MANAGED_VM_SUFFIX_RE2='^vm[0-9]+$'
 
 addHostToSshConfig(){
 	VM="$1"
 	HOST_SSH_PORT="$2"
 	set +e
-	$SSHCONFIG rm "$VM" >/dev/null 2>&1
+	cmd="$SSHCONFIG rm \"$VM\" >/dev/null 2>&1"
+    eval $cmd
+    cmd="$SSHCONFIG add "$VM" root 127.0.0.1 $HOST_SSH_PORT"
+    out="$(eval $cmd)"
+	exit_code=$?
+	if [[ "$exit_code" != "0" ]]; then
+			echo cmd=$cmd;
+			echo out=$out;
+			echo exit_code=$exit_code;
+			exit $exit_code;
+    fi
 	set -e
-	$SSHCONFIG add "$VM" root 127.0.0.1 $HOST_SSH_PORT
 }
 snapshotVM(){
-       TEMPLATE="$1"
-       SNAPSHOT_NAME="$2"
-	VBoxManage snapshot $TEMPLATE list|grep "Name: $SNAPSHOT_NAME (UUID: " >/dev/null || 
-	  VBoxManage snapshot $TEMPLATE take $SNAPSHOT_NAME
+    TEMPLATE="$1"
+    SNAPSHOT_NAME="$2"
+    #VBoxManage snapshot $TEMPLATE list|grep "Name: $SNAPSHOT_NAME (UUID: " >/dev/null || \
+    listSnapshots "$TEMPLATE" |grep "Name: $SNAPSHOT_NAME (UUID: " >/dev/null || \
+        VBoxManage snapshot $TEMPLATE take $SNAPSHOT_NAME
+}
+listSnapshots(){
+    VM="$1"
+    VBoxManage snapshot "$VM" list
+}
+deleteSnapshot(){
+    VM="$1"
+    SNAPSHOT_NAME="$2"
+    set -e
+    VBoxManage snapshot "$VM" delete "$SNAPSHOT_NAME"
 }
 createVmFromShapshot(){
 	VM="$1"
@@ -39,7 +63,7 @@ createVmFromShapshot(){
 	SNAPSHOT_NAME="$3"
 	# Create VM from snapshot
 	VBoxManage clonevm $TEMPLATE \
-	  --options link --mode machine --snapshot $SNAPSHOT_NAME --name $VM --register
+    	  --options link --mode machine --snapshot $SNAPSHOT_NAME --name $VM --register
 }
 startVM(){
 	VM="$1"
@@ -56,10 +80,10 @@ waitForReadyVM(){
 	VM="$1"
 	set +e
 	while [ 1 ]; do
-		CMD="VBoxManage guestcontrol $VM $COMMON_ARGS \
+		cmd="VBoxManage guestcontrol $VM $COMMON_ARGS \
 		  run --exe /bin/bash --timeout 5000 -- bash/arg0 \
 		    -c 'id'"
-		out="$(eval $CMD 2>&1)"
+		out="$(eval $cmd 2>&1)"
 		exit_code=$?
 		if [[ "$exit_code" == "0" ]]; then
 			echo New VM is ready
@@ -67,12 +91,17 @@ waitForReadyVM(){
 		fi
 		echo "$out" | grep 'The guest execution service is not ready' >/dev/null || {
 			echo "Unknown msg";
-			echo CMD=$CMD;
+			echo cmd=$cmd;
 			echo out=$out;
 			echo exit_code=$exit_code;
 			exit $exit_code;
 		}
 		echo "Waiting for new VM to be ready."
+        if [[ "$DEBUG_MODE" == "1" ]]; then
+			echo exit_code=$exit_code;
+			echo cmd=$cmd;
+			echo out=$out;
+        fi
 		sleep 1.0
 	done
 	set -e
@@ -96,8 +125,11 @@ showPortForwarding(){
 			VBoxManage showvminfo $vm > .info.txt
 			NAME="$(cat .info.txt|grep '^Name: '|tr -s ' '|cut -d' ' -f2-100)"
 			OS="$(cat .info.txt|grep 'Guest OS: '|tr -s ' '|cut -d' ' -f3-100)"
-			NATS="$(VBoxManage showvminfo $vm|grep 'Rule' | sed 's/ //g'|cut -d':' -f2|tr ',' '\n'|sed 's/=/: /g'|yaml2json 2>&1 |jq -Mrc 2>/dev/null)"
-			echo -e " - UUID: $vm\n   NAME: $NAME\n   OS: $OS\n   RULE: $NATS"
+            VBoxManage showvminfo $vm|grep 'Rule' | sed 's/ //g'|cut -d':' -f2 > .NATS-${vm}.txt
+            while IFS= read -r NAT; do
+                _NAT="$(echo $NAT|tr ',' '\n'|sed 's/=/: /g'|yaml2json 2>&1 |jq -Mrc 2>/dev/null)"
+			    echo -e " - UUID: $vm\n   NAME: $NAME\n   OS: $OS\n   RULE: $_NAT"
+            done < .NATS-${vm}.txt
 		done
 	)	| yaml2json 2>/dev/null | jq
 	set -e
@@ -129,6 +161,11 @@ deletePortForward(){
 			echo cmd=$cmd;
 			echo out=$out;
 		}
+        if [[ "$DEBUG_MODE" == "1" ]]; then
+			echo exit_code=$exit_code;
+			echo cmd=$cmd;
+			echo out=$out;
+        fi
 		sleep 1.0
 	done
 	set -e
@@ -145,8 +182,14 @@ secureVM(){
 	    -c 'chown -R root:root /root; chmod -R 700 /root; systemctl enable sshd; systemctl start sshd; systemctl start sshd;' \
 	| egrep -v '^waitResult:'
 }
+getAllVMs_raw(){
+    VBoxManage list -s vms
+}
+getAllVMs(){
+    getAllVMs_raw | cut -d'"' -f2
+}
 getAllClones(){
-	VBoxManage list -s vms|cut -d'"' -f2|grep "^$TEMPLATE_BASE"|grep -v "${TEMPLATE_KEYWORD}$"
+	getAllVMs|grep "^$TEMPLATE_BASE"|grep -v "${TEMPLATE_KEYWORD}$"
 }
 stopAllClones(){
     (	
@@ -154,16 +197,53 @@ stopAllClones(){
 		| xargs -I % echo "VBoxManage controlvm % acpipowerbutton 2>/dev/null"
     ) | bash
 }
+deleteVM(){
+   	export VM="$1"
+    echo "$1" | grep "^$TEMPLATE_BASE" >/dev/null ||
+    	export VM="${TEMPLATE_BASE}$1"
+    echo "$VM" | grep "^$TEMPLATE_BASE" >/dev/null || {
+        echo Invalid VM $VM
+        exit 1
+    }
+#    if ! [[ "$1" =~ "$MANAGED_VM_SUFFIX_RE1" ]] && ! [[ "$1" =~ "$MANAGED_VM_SUFFIX_RE2" ]]; then
+#        echo "Invalid VM suffix. (VM=$VM)"
+#        exit 1
+#    fi
+    set +e
+    cmd="VBoxManage controlvm "$VM" poweroff 2>/dev/null; VBoxManage unregistervm $VM --delete"
+    eval $cmd
+    exit_code=$?
+	if [[ "$exit_code" == "0" ]]; then
+        set -e
+        return
+    else
+        echo cmd=$cmd;
+        echo out=$out;
+        echo exit_code=$exit_code;
+        exit $exit_code;
+    fi
+}
+#                VBoxManage unregistervm % --delete 2>/dev/null && exit; sleep 1.0 \
 deleteAllClones(){
 	set +e
 	stopAllClones
     while [[ "$(eval getAllClones 2>/dev/null |wc -l)" -gt "0" ]]; do
-	    (
-		getAllClones \
-			| xargs -I % echo "while [ 1 ]; do VBoxManage unregistervm % --delete 2>/dev/null && exit; sleep 1.0; done"
-	    ) 	| bash
-	    sleep 1.0
+        for c in $(getAllClones|egrep "^${TEMPLATE_BASE}vm[0-9]|^${TEMPLATE_BASE}[0-9]"); do
+            deleteVM "$c"
+        done
+        sleep 1.0
     done
+
+#    exit 0
+#    while [[ "$(eval getAllClones 2>/dev/null |wc -l)" -gt "0" ]]; do
+#	    (
+#		getAllClones \
+#			| xargs -I % echo "while [[ "1" ]]; do \
+#                $(deleteVM "$VM_SUFFIX" && exit); sleep 1.0 \
+#            done" \
+#	    )
+#	    sleep 1.0
+#    done
     set -e
 }
 testServerSshConnection(){
@@ -203,13 +283,14 @@ portDemo(){
 validateNewVM(){
 	VM="$1"
 	set -e
-	command ssh $SSH_COMMON_OPTS "$VM" cat /etc/redhat-release
-	command ssh $SSH_COMMON_OPTS "$VM" hostname -f
+	command ssh $SSH_COMMON_OPTS "$VM" cat /etc/redhat-release >/dev/null
+	command ssh $SSH_COMMON_OPTS "$VM" hostname -f >/dev/null
 }
 createVM(){
 	#deleteAllClones
 	snapshotVM "$TEMPLATE" "$SNAPSHOT_NAME"
 	createVmFromShapshot "$NEW_VM" "$TEMPLATE" "$SNAPSHOT_NAME"
+    #deleteSnapshot "$TEMPLATE" "$SNAPSHOT_NAME"
 	stopVM "$NEW_VM"
 	deletePortForward "$NEW_VM" 1 ssh
 	startVM "$NEW_VM"
@@ -221,18 +302,18 @@ createVM(){
 	echo "Forwarding on port $SSH_PORT"
 	createPortForward "$NEW_VM" 1 ssh $SSH_PORT 22
 	addHostToSshConfig "$NEW_VM" $SSH_PORT
+	addHostToSshConfig "$VM_SUFFIX" $SSH_PORT
 	validateNewVM "$NEW_VM"
 }
 
 main() {
-    re='^[0-9]+$'
-    re2='^vm[0-9]+$'
-    if ! [[ $1 =~ $re ]] && ! [[ $1 =~ $re2 ]]; then
-        "${1}"
+    if [[ "$1" == "template" ]]; then echo Cannot manage template; exit 1; fi
+    if ! [[ $1 =~ $MANAGED_VM_SUFFIX_RE1 ]] && ! [[ $1 =~ $MANAGED_VM_SUFFIX_RE2 ]]; then
+        "${1}" "$2" "$3" "$4" "$5" "$6" "$7"
     else
-	#portDemo
-	#manageVM
-	createVM
+        #portDemo
+        #manageVM
+        createVM
         echo
     fi
 }
