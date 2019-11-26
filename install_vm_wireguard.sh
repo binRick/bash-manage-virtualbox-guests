@@ -15,7 +15,7 @@ POST_INSTALL_CMD="mv $INSTALL_VM_PATH/wg-json /usr/sbin/."
 INSTALL_CMD="bash -e $INSTALL_VM_PATH/setupWireguardVM.sh"
 VALIDATION_CMD="wg"
 PUBLIC_KEY_PATH="/etc/wireguard/publickey"
-PRIVATE_KEY_PATH="/etc/wireguard/publickey"
+PRIVATE_KEY_PATH="/etc/wireguard/privatekey"
 LOCAL_VM_PUBLIC_KEY_FILE="$(pwd)/${VM}.pub"
 WIREGUARD_INTERFACE="wg0"
 WIREGUARD_CONFIG="/etc/wireguard/${WIREGUARD_INTERFACE}.conf"
@@ -27,6 +27,7 @@ WG_SAVE_CMD="wg-quick save $WIREGUARD_INTERFACE"
 GET_CLIENT_IP_CMD="echo \$(( ( RANDOM % $CLIENT_IP_SUFFIX_MAX )  + $CLIENT_IP_SUFFIX_MIN ))"
 GET_CLIENT_IP_SUFFIXES_IN_USE_CMD_ENCODED=$(echo 'wg|grep allowed|grep -oE "\b([0-9]{1,3}\.){3}[0-9]{1,3}\b"|sed "s/192.168.4.//g"|sort|uniq'|base64 -w0)
 SETUP_WIREGUARD_CLIENT_CMD_ENCODED=$(echo '
+sed -i "s/[[:space:]]//g" /root/vars.sh
 source /root/vars.sh;
 mkdir -p /etc/wireguard 2>/dev/null; 
 cd /etc/wireguard; 
@@ -38,6 +39,8 @@ wg setconf $WIREGUARD_INTERFACE $WIREGUARD_CONFIG;
 cat $WIREGUARD_CONFIG; 
 wg; 
 ip link set up dev $WIREGUARD_INTERFACE; 
+(echo "[Interface]"; echo "Address = $_WIREGUARD_CLIENT_ADDRESS"; cat /etc/wireguard/wg0.conf |grep -v "\[Interface\]") > t && mv -f t /etc/wireguard/wg0.conf;
+cat $WIREGUARD_CONFIG;
 wg-quick down $WIREGUARD_INTERFACE; 
 wg-quick up $WIREGUARD_INTERFACE; 
 wg; 
@@ -46,7 +49,7 @@ timeout 5 curl ifconfig.me;
 echo -e "\n\n";'|base64 -w0)
 
 GET_CLIENT_IP_SUFFIXES_IN_USE_CMD="echo \"$GET_CLIENT_IP_SUFFIXES_IN_USE_CMD_ENCODED\"|base64 -d > script.sh && bash -ex script.sh"
-SETUP_WIREGUARD_CLIENT_CMD="echo \"$SETUP_WIREGUARD_CLIENT_CMD_ENCODED\"|base64 -d > script.sh && bash -ex script.sh"
+SETUP_WIREGUARD_CLIENT_CMD="echo \"$SETUP_WIREGUARD_CLIENT_CMD_ENCODED\"|base64 -d > script.sh && bash -x script.sh"
 GET_WIREGUARD_SERVER_IP_CMD="grep ^Address $WIREGUARD_CONFIG |grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b'"
 
 
@@ -148,6 +151,6 @@ ls -al $CLIENT_SETUP_VARS_FILE
 
 command rsync $RSYNC_OPTS $CLIENT_SETUP_VARS_FILE $VM:/root/vars.sh
 echo -e "\nSETUP_WIREGUARD_CLIENT_CMD=\n   $SETUP_WIREGUARD_CLIENT_CMD\n"
-command ssh $SSH_OPTS $VM "echo sh -c \"source /root/vars.sh && $SETUP_WIREGUARD_CLIENT_CMD\""
+command ssh $SSH_OPTS $VM "$SETUP_WIREGUARD_CLIENT_CMD"
 exit_code=$?
 echo SETUP_WIREGUARD_CLIENT_CMD exit_code=$exit_code
