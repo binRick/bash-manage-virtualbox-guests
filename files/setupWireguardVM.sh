@@ -2,7 +2,7 @@
 #wget http://download.virtualbox.org/virtualbox/6.0.12/VBoxGuestAdditions_6.0.12.iso
 if [[ "$SUBNET" == "" ]];  then echo Invalid SUBNET; exit 1; fi
 if [[ "$WIREGUARD_CLIENT_ADDRESS" == "" ]];  then echo Invalid WIREGUARD_CLIENT_ADDRESS; exit 1; fi
-if [[ "$WIREGUARD_CLIENT_ROUTES" == "" ]];  then echo Invalid WIREGUARD_CLIENT_ROUTES; exit 1; fi
+if [[ "$_WIREGUARD_CLIENT_ROUTES" == "" ]];  then echo Invalid WIREGUARD_CLIENT_ROUTES; exit 1; fi
 if [[ "$WIREGUARD_SERVER_ENDPOINT" == "" ]];  then echo Invalid WIREGUARD_SERVER_ENDPOINT; exit 1; fi
 if [[ "$WIREGUARD_SERVER_PUBLIC_KEY" == "" ]];  then echo Invalid WIREGUARD_SERVER_PUBLIC_KEY; exit 1; fi
 if [[ "$PUBLIC_KEY_PATH" == "" ]];  then echo Invalid PUBLIC_KEY_PATH; exit 1; fi
@@ -37,7 +37,7 @@ PrivateKey = $PRIV
 
 [Peer]
 PublicKey = ${WIREGUARD_SERVER_PUBLIC_KEY}
-AllowedIPs = ${WIREGUARD_CLIENT_ROUTES}
+AllowedIPs = ${_WIREGUARD_CLIENT_ROUTES}
 Endpoint = $WIREGUARD_SERVER_ENDPOINT
 PersistentKeepalive = 25
 EOF

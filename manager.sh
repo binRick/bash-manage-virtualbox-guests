@@ -10,13 +10,13 @@ set -e
 VM_MIN_ID=100
 VM_MAX_ID=1000
 TEMPLATE_BASE=centos-8-
-TEMPLATE_KEYWORD=template
+TEMPLATE_KEYWORD=template1
 VM_SUFFIX="$1"
 VM_PREFIX="vm"
 NEW_VM=${TEMPLATE_BASE}${VM_SUFFIX}
 NEW_HOSTNAME=$NEW_VM
 TEMPLATE=${TEMPLATE_BASE}${TEMPLATE_KEYWORD}
-SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard-ansible
+SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard-ansible-nettools
 export B64_DECODE_FLAG=$(set +e; echo 123 | base64 |base64 -d 2>/dev/null |grep -q 123 && echo d || echo D)
 timeout=$(set +e; (command -v timeout || command -v gtimeout || brew install coreutils && command -v gtimeout|grep timeout) |head -n1)
 
@@ -72,6 +72,9 @@ deleteSnapshot(){
     SNAPSHOT_NAME="$2"
     set -e
     VBoxManage snapshot "$VM" delete "$SNAPSHOT_NAME"
+}
+excludeVMs(){
+    egrep -vi 'win|template|save|vip'
 }
 vmExists(){
 	VM="$1"
@@ -239,7 +242,7 @@ secureVM(){
 	| egrep -v '^waitResult:'
 }
 getAllVMs_raw(){
-    VBoxManage list -s vms
+    VBoxManage list -s vms | excludeVMs
 }
 getAllVMs(){
     getAllVMs_raw | cut -d'"' -f2
