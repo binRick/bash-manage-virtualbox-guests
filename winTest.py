@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import os, json, sys, winrm, base64
-u = 'User'
+p = os.environ['WINUSER']
 p = os.environ['WINPASS']
-h = 'http://127.0.0.1:5985/wsman'
+if 'WINURI' in os.environ:
+    h = os.environ['WINURI']
+else:
+    h = 'http://127.0.0.1:5985/wsman'
 
 
 ps_script = """$strComputer = $Host
