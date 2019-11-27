@@ -109,7 +109,7 @@ createVmFromShapshot(){
 }
 startVM(){
 	VM="$1"
-	VBoxManage startvm $VM --type headless
+	VBoxManage startvm "$VM" --type headless
 }
 stopVM(){
 	set +e
@@ -147,7 +147,7 @@ waitForReadyVM(){
 			echo exit_code=$exit_code;
 			exit $exit_code;
 		}
-		echo "Waiting for new VM to be ready."
+		[[ "$DEBUG_MODE" == "1" ]] && echo "Waiting for new VM to be ready."
         if [[ "$DEBUG_MODE" == "1" ]]; then
 			echo exit_code=$exit_code;
 			echo cmd=$cmd;
@@ -177,9 +177,12 @@ vmCommand(){
 	eval $cmd
 	exit_code=$?
 }
+FLOCK_ARGS="-w 10"
 showPortForwarding(){
-	set +e
-	(
+  set +e
+  (
+        echo "Locking showPortForwarding"
+        echo -e "  Locked!"
 		echo PORT_FORWARDING: && for vm in $(VBoxManage list -s runningvms|cut -d'{' -f2|cut -d'}' -f1); do
 			VBoxManage showvminfo $vm > .info.txt
 			NAME="$(cat .info.txt|grep '^Name: '|tr -s ' '|cut -d' ' -f2-100)"
@@ -190,8 +193,8 @@ showPortForwarding(){
 			    echo -e " - UUID: $vm\n   NAME: $NAME\n   OS: $OS\n   RULE: $_NAT"
             done < .NATS-${vm}.txt
 		done
-	)	| yaml2json 2>/dev/null | jq
-	set -e
+  ) | yaml2json 2>/dev/null | jq
+  set -e
 }
 createPortForward(){
 	VM="$1"
@@ -240,6 +243,22 @@ secureVM(){
 	  run --exe /bin/bash --timeout 5000 -- bash/arg0 \
 	    -c 'chown -R root:root /root; chmod -R 700 /root; systemctl enable sshd; systemctl start sshd; systemctl status sshd;' \
 	| egrep -v '^waitResult:'
+}
+getForwardedHostPorts(){
+	showPortForwarding 2>&1 | grep -i hostport|cut -d':' -f2|sed 's/[[:space:]]//g'|sed 's/,//g'| grep '^[0-9].*[0-9]$'|sort|uniq
+}
+getMaxForwardedHostPort(){
+	getForwardedHostPorts | maxValueInList
+}
+getNextForwardedHostPort(){
+    set +e
+	NEXT_PORT="$(getMaxForwardedHostPort | xargs -I % echo "% + 1"| bc)"
+    if [[ "$NEXT_PORT" == "" ]]; then
+        >&2 echo -e "  [Warning]  No Forwarded Ports found. Starting at 5000"
+        NEXT_PORT=5000
+    fi
+    set -e
+    echo $NEXT_PORT
 }
 getAllVMs_raw(){
     VBoxManage list -s vms | excludeVMs
@@ -303,8 +322,8 @@ testServerSshConnection(){
 	eval $cmd >/dev/null
 }
 manageVM(){
-	stopVM "$NEW_VM"
-	deletePortForward "$NEW_VM" 1 ssh
+	stopVM "$NEW_VM" 2>/dev/null
+	deletePortForward "$NEW_VM" 1 ssh 2>/dev/null
 	startVM "$NEW_VM"
 	SSH_PORT="$(eval getNextForwardedHostPort)"
 	showPortForwarding
@@ -312,15 +331,6 @@ manageVM(){
 	createPortForward "$NEW_VM" 1 ssh $SSH_PORT 22
 	showPortForwarding
 	testServerSshConnection "$NEW_VM" $SSH_PORT
-}
-getForwardedHostPorts(){
-	showPortForwarding 2>&1 | grep -i hostport|cut -d':' -f2|sed 's/[[:space:]]//g'|sed 's/,//g'| grep '^[0-9].*[0-9]$'|sort|uniq
-}
-getMaxForwardedHostPort(){
-	getForwardedHostPorts | maxValueInList
-}
-getNextForwardedHostPort(){
-	getMaxForwardedHostPort | xargs -I % echo "% + 1"| bc
 }
 maxValueInList(){
 	awk 'min == "" || $1<min{min=$1} $1>max{max=$1} END{print max}'

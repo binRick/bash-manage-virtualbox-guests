@@ -3,3 +3,9 @@
 *.swp
 .NATS-*txt
 .NATS.txt
+*.pub
+vm1488.pub
+vm300
+vpnservice.company/
+t
+.attic
