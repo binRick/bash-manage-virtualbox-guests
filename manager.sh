@@ -18,7 +18,12 @@ NEW_HOSTNAME=$NEW_VM
 TEMPLATE=${TEMPLATE_BASE}${TEMPLATE_KEYWORD}
 SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard-ansible-nettools
 export B64_DECODE_FLAG=$(set +e; echo 123 | base64 |base64 -d 2>/dev/null |grep -q 123 && echo d || echo D)
-timeout=$(set +e; (command -v timeout || command -v gtimeout || brew install coreutils && command -v gtimeout|grep timeout) |head -n1)
+set +e
+timeout=$(command -v timeout)
+if [ "$timeout" == "" ]; then
+	timeout=$(set +e; (command -v timeout || command -v gtimeout || brew install coreutils && command -v gtimeout|grep timeout) |head -n1)
+fi
+set -e
 
 
 
