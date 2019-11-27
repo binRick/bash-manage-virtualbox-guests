@@ -4,7 +4,7 @@ VM="$1"
 _WIREGUARD_SERVER_ENDPOINT="${_WIREGUARD_SERVER_ENDPOINT_DOMAIN}:${_WIREGUARD_SERVER_ENDPOINT_PORT}"
 if [[ "$_WIREGUARD_SERVER_ENDPOINT" == ":" ]]; then echo invalid _WIREGUARD_SERVER_ENDPOINT; exit 1; fi
 _WIREGUARD_CLIENT_ROUTES="216.239.0.0/16,123.123.123.0/24,10.14.0.2/32"
-SSH_OPTS="-oStrictHostKeyChecking=no -tt -q"
+SSH_OPTS="-oStrictHostKeyChecking=no -q"
 VM_PACKAGES="rsync tcpdump ngrep telnet"
 RSYNC_OPTS="-e 'ssh $SSH_OPTS'"
 RSYNC_OPTS=""
@@ -39,13 +39,17 @@ cat $WIREGUARD_CONFIG;
 wg; 
 ip link set up dev $WIREGUARD_INTERFACE; 
 (echo "[Interface]"; echo "Address = $_WIREGUARD_CLIENT_ADDRESS"; cat /etc/wireguard/wg0.conf |grep -v "\[Interface\]") > t && mv -f t /etc/wireguard/wg0.conf;
-cat $WIREGUARD_CONFIG;
+chmod -R 600 /etc/wireguard;
+chown -R root:root /etc/wireguard;
 wg-quick down $WIREGUARD_INTERFACE; 
 wg-quick up $WIREGUARD_INTERFACE; 
 wg; 
-echo -e "\n\n"; 
+wg-quick down wg0;
+systemctl enable wg-quick@wg0;
+systemctl restart wg-quick@wg0;
+systemctl status wg-quick@wg0;
 timeout 10 curl -4s https://ifconfig.me;
-echo -e "\n\n";'|base64 -w0)
+'|base64 -w0)
 GET_WIREGUARD_PUBLIC_KEY_CMD="wg show wg0 public-key"
 GET_WIREGUARD_PORT_CMD="wg show wg0 listen-port"
 GET_WIREGUARD_INTERFACES_CMD="wg show wg0 interfaces"
@@ -76,9 +80,6 @@ _WIREGUARD_SERVER_PUBLIC_KEY="$(cat $SERVER_PUBLIC_KEY_FILE)"
            echo "_${SUFFIX}_"
          done < $SUFFIXES_IN_USE_FILE
                                             ) > $IPS_IN_USE_FILE
-
-echo IPs in use:
-cat $IPS_IN_USE_FILE 
 
 ip_is_available(){
     IP="$1"

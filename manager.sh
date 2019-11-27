@@ -181,8 +181,8 @@ FLOCK_ARGS="-w 10"
 showPortForwarding(){
   set +e
   (
-        echo "Locking showPortForwarding"
-        echo -e "  Locked!"
+        #echo "Locking showPortForwarding"
+        #echo -e "  Locked!"
 		echo PORT_FORWARDING: && for vm in $(VBoxManage list -s runningvms|cut -d'{' -f2|cut -d'}' -f1); do
 			VBoxManage showvminfo $vm > .info.txt
 			NAME="$(cat .info.txt|grep '^Name: '|tr -s ' '|cut -d' ' -f2-100)"
@@ -336,9 +336,9 @@ maxValueInList(){
 	awk 'min == "" || $1<min{min=$1} $1>max{max=$1} END{print max}'
 }
 portDemo(){
-	#getForwardedHostPorts
+	getForwardedHostPorts
 	#getMaxForwardedHostPort
-	getNextForwardedHostPort
+	#getNextForwardedHostPort
 }
 validateNewVM(){
 	VM="$1"
