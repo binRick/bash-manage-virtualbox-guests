@@ -2,11 +2,13 @@
 set -e -o pipefail
 cd $( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
+export PATH=$PATH:$(pwd)/.ansi:$(pwd)/.sshconfig
 . .bash-concurrent/concurrent.lib.sh
 set +e
 command yaml2json --version >/dev/null 2>&1 || . ~/.venv/bin/activate
 set -e
 
+GLOBAL_EXCLUDED_HOSTS="win|template|save|vip"
 VM_MIN_ID=100
 VM_MAX_ID=1000
 TEMPLATE_BASE=centos-8-
@@ -16,7 +18,7 @@ VM_PREFIX="vm"
 NEW_VM=${TEMPLATE_BASE}${VM_SUFFIX}
 NEW_HOSTNAME=$NEW_VM
 TEMPLATE=${TEMPLATE_BASE}${TEMPLATE_KEYWORD}
-SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard-ansible-nettools
+SNAPSHOT_NAME=${TEMPLATE_KEYWORD}-wireguard-ansible-nettools-git-node-extrace-mysql5
 export B64_DECODE_FLAG=$(set +e; echo 123 | base64 |base64 -d 2>/dev/null |grep -q 123 && echo d || echo D)
 set +e
 timeout=$(command -v timeout)
@@ -79,7 +81,12 @@ deleteSnapshot(){
     VBoxManage snapshot "$VM" delete "$SNAPSHOT_NAME"
 }
 excludeVMs(){
-    egrep -vi 'win|template|save|vip'
+    EXCLUDED="$GLOBAL_EXCLUDED_HOSTS"
+    if [[ "$EXCLUDED_HOSTS" != "" ]]; then
+        EXCLUDED="${EXCLUDED_HOSTS}|${EXCLUDED}"
+    fi
+    egrep -vi "${EXCLUDED}"
+    #egrep -vi "${EXCLUDED_HOSTS}|win|template|save|vip"
 }
 vmExists(){
 	VM="$1"
@@ -87,20 +94,17 @@ vmExists(){
 }
 normalizeNewVMName(){
 	VM="$1"
-#	if echo "$VM" | grep -q "\-${VM_PREFIX}"; then export VM="${VM_PREFIX}${VM}"; fi
 	if echo "$VM" | grep -q '\-random$'; then
 		_VM="$VM"
 		getAllVMs > .vms.txt
 		echo "$VM" >> .vms.txt
 		while $(grep -q "^$VM$" .vms.txt); do
-			echo "vm exists..."
-			sleep .1
+			sleep 1.0
 			R=$(( ( RANDOM % $VM_MAX_ID )  + $VM_MIN_ID ))
 			VM=$(echo "$_VM"|sed "s/-random/$R/g" )
 		done
 		rm .vms.txt
 	fi
-#	echo "$VM" | grep -q "{$TEMPLATE_BASE}" || export VM="${TEMPLATE_BASE}${VM}"
 	echo "$VM"
 }
 createVmFromShapshot(){
@@ -108,20 +112,19 @@ createVmFromShapshot(){
 	TEMPLATE="$2"
 	SNAPSHOT_NAME="$3"
 	set -e
-	# Create VM from snapshot
 	VBoxManage clonevm $TEMPLATE \
     	  --options link --mode machine --snapshot $SNAPSHOT_NAME --name $VM --register
 }
 startVM(){
 	VM="$1"
-	VBoxManage startvm "$VM" --type headless
+	VBoxManage startvm "$VM" --type headless 2>/dev/null
 }
 stopVM(){
 	set +e
 	VM="$1"
 	SHUTDOWN=0
 	MAX_SECS=15
-	$timeout $MAX_SECS VBoxManage controlvm "$VM" acpipowerbutton
+	$timeout $MAX_SECS VBoxManage controlvm "$VM" acpipowerbutton 2>/dev/null
        #	| grep 'is not currently running' && exit
 #	while [[ "$SHUTDOWN" == "0" ]]; do
 #		($timeout $MAX_SECS VBoxManage controlvm "$VM" acpipowerbutton 2>&1)|grep 'is not currently running' && exit
@@ -142,7 +145,7 @@ waitForReadyVM(){
 		out="$(eval $cmd 2>&1)"
 		exit_code=$?
 		if [[ "$exit_code" == "0" ]]; then
-			echo New VM is ready
+			#echo New VM is ready
 			break
 		fi
 		echo "$out" | grep 'The guest execution service is not ready' >/dev/null || {
@@ -152,8 +155,8 @@ waitForReadyVM(){
 			echo exit_code=$exit_code;
 			exit $exit_code;
 		}
-		[[ "$DEBUG_MODE" == "1" ]] && echo "Waiting for new VM to be ready."
         if [[ "$DEBUG_MODE" == "1" ]]; then
+            echo "Waiting for new VM to be ready."
 			echo exit_code=$exit_code;
 			echo cmd=$cmd;
 			echo out=$out;
@@ -178,7 +181,7 @@ vmCommand(){
 	VM="$1"
 	CMD="$2"
 	cmd="VBoxManage guestcontrol \"$VM\" $COMMON_ARGS run --exe /bin/bash --timeout 5000 -- bash/arg0 -c \"$CMD\""
-	echo "$cmd"
+	#echo "$cmd"
 	eval $cmd
 	exit_code=$?
 }
@@ -283,15 +286,11 @@ stopAllClones(){
 deleteVM(){
    	export VM="$1"
     echo "$1" | grep "^$TEMPLATE_BASE" >/dev/null ||
-    	export VM="${TEMPLATE_BASE}$1"
+    export VM="${TEMPLATE_BASE}$1"
     echo "$VM" | grep "^$TEMPLATE_BASE" >/dev/null || {
         echo Invalid VM $VM
         exit 1
     }
-#    if ! [[ "$1" =~ "$MANAGED_VM_SUFFIX_RE1" ]] && ! [[ "$1" =~ "$MANAGED_VM_SUFFIX_RE2" ]]; then
-#        echo "Invalid VM suffix. (VM=$VM)"
-#        exit 1
-#    fi
     set +e
     cmd="VBoxManage controlvm "$VM" poweroff 2>/dev/null; VBoxManage unregistervm $VM --delete"
     eval $cmd
@@ -332,7 +331,7 @@ manageVM(){
 	startVM "$NEW_VM"
 	SSH_PORT="$(eval getNextForwardedHostPort)"
 	showPortForwarding
-	echo "Forwarding on port $SSH_PORT"
+	#echo "Forwarding on port $SSH_PORT"
 	createPortForward "$NEW_VM" 1 ssh $SSH_PORT 22
 	showPortForwarding
 	testServerSshConnection "$NEW_VM" $SSH_PORT
@@ -357,7 +356,7 @@ createVM(){
 	[[ "$_DELETE_ALL_CLONES" == "1" ]] && deleteAllClones
 	snapshotVM "$TEMPLATE" "$SNAPSHOT_NAME"
 	createVmFromShapshot "$NEW_VM" "$TEMPLATE" "$SNAPSHOT_NAME"
-    	#deleteSnapshot "$TEMPLATE" "$SNAPSHOT_NAME"
+    #deleteSnapshot "$TEMPLATE" "$SNAPSHOT_NAME"
 	stopVM "$NEW_VM"
 	deletePortForward "$NEW_VM" 1 ssh
 	startVM "$NEW_VM"

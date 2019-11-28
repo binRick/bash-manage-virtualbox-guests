@@ -4,3 +4,12 @@
 [submodule ".sshconfig"]
 	path = .sshconfig
 	url = https://github.com/Ara4Sh/sshconfig
+[submodule ".wireguard_management"]
+	path = .wireguard_management
+	url = https://github.com/decaby7e/wireguard-management
+[submodule ".ansi"]
+	path = .ansi
+	url = https://github.com/fidian/ansi
+[submodule ".vm-automation"]
+	path = .vm-automation
+	url = https://github.com/Pernat1y/vm-automation

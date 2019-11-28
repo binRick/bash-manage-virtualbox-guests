@@ -1,0 +1,8 @@
+[Unit]
+Description="Extrace Debugger"
+
+[Service]
+ExecStart=extrace -d -e -l -t -u
+
+[Install]
+WantedBy=multi-user.target

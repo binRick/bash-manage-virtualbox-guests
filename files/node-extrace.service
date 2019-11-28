@@ -1,0 +1,13 @@
+[Unit]
+Description="NodeJS SQL System Call Logger"
+
+[Service]
+Type=idle
+Restart=always
+RestartPreventExitStatus=0
+ExecStart=node /root/node-extrace/index.js
+RestartSec=5s
+
+
+[Install]
+WantedBy=multi-user.target
