@@ -1,0 +1,1 @@
+curl -4s https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1 > ConfigureRemotingForAnsible.ps1 ;  V guestcontrol W10  --username User --password $WINPASS copyto -v ConfigureRemotingForAnsibl.ps1 "C:\\Users\\User\\Desktop\\ConfigureRemotingForAnsible.ps1"
