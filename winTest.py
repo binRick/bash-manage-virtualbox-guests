@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os, json, sys, winrm, base64
-p = os.environ['WINUSER']
+u = os.environ['WINUSER']
 p = os.environ['WINPASS']
 if 'WINURI' in os.environ:
     h = os.environ['WINURI']
@@ -27,8 +27,25 @@ p = winrm.protocol.Protocol(
         password=p,
         server_cert_validation='ignore')
 
+EXEC = 'choco'
+EXEC_ARGS = ['install','googlechrome','-y']
+
+EXEC = 'ipconfig'
+EXEC_ARGS = ['/all']
+
+
+EXEC = 'python'
+EXEC_ARGS = ['--version']
+
+EXEC = 'pip'
+EXEC_ARGS = ['install','pywinauto','--upgrade','--force']
+EXEC_ARGS = ['list']
+
+EXEC = 'dir'
+EXEC_ARGS = ['c:\\Users\\User\\Desktop']
+
 shell_id = p.open_shell()
-command_id = p.run_command(shell_id, 'ipconfig', ['/all'])
+command_id = p.run_command(shell_id, EXEC, EXEC_ARGS)
 std_out, std_err, status_code = p.get_command_output(shell_id, command_id)
 
 p.cleanup_command(shell_id, command_id)

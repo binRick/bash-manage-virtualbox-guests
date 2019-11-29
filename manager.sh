@@ -370,6 +370,7 @@ createVM(){
 	addHostToSshConfig "$VM_SUFFIX" $SSH_PORT
 	validateNewVM "$NEW_VM"
 	[[ "$_INSTALL_WIREGUARD" == "1" ]] && time ./install_vm_wireguard.sh "$NEW_VM"
+	#[[ "$_ADD_TO_MODULE" == "1" ]] && time ./add_to_module.sh "$NEW_VM"
 }
 
 main() {

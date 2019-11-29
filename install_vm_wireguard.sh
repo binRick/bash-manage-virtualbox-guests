@@ -206,6 +206,7 @@ VM_DNS_NAME="$VM"
 VM_DNS_DOMAIN_ID=1052503
 VM_DNS_IP="$_WIREGUARD_CLIENT_ADDRESS"
 
+exit
 
 echo Disabling Root Login and creating service account
 DISABLE_ROOT_CMD="ssh -tt $SSH_OPTS $VM_DNS_USER@$VM_DNS_SERVER \"\
